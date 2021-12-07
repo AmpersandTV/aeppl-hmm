@@ -1,0 +1,2 @@
+include versioneer.py
+include aeppl_hmm/_version.py
