@@ -3,6 +3,9 @@ import aesara.tensor as at
 import aesara.tensor.random as atr
 import numpy as np
 import pytest
+import scipy.stats as sp
+from aeppl import joint_logprob
+from aeppl.dists import dirac_delta
 from aeppl.logprob import logprob
 
 from aeppl_hmm.logprob import (
@@ -347,7 +350,8 @@ def test_switching_process_random():
     assert test_sample.shape == (test_states.shape[0],)
     assert np.all(test_sample[test_states > 0] > 0)
 
-    test_sample = switching_process(mu_zero_nonzero, test_states, size=5).eval()
+    test_states_sized = np.broadcast_to(test_states, (5,) + test_states.shape)
+    test_sample = switching_process(mu_zero_nonzero, test_states_sized).eval()
     assert np.array_equal(test_sample.shape, (5,) + test_states.shape)
     assert np.all(test_sample[..., test_states > 0] > 0)
 
@@ -358,7 +362,8 @@ def test_switching_process_random():
         test_dist.shape.eval({test_states: test_states.tag.test_value}),
         test_states.tag.test_value.shape,
     )
-    test_sample = switching_process(mu_zero_nonzero, test_states, size=1).eval(
+    test_states_sized = at.broadcast_to(test_states, (1,) + tuple(test_states.shape))
+    test_sample = switching_process(mu_zero_nonzero, test_states_sized).eval(
         {test_states: test_states.tag.test_value}
     )
     assert np.array_equal(test_sample.shape, (1,) + test_states.tag.test_value.shape)
@@ -399,8 +404,9 @@ def test_switching_process_random():
     assert np.array_equal(test_dist.shape.eval(), test_states.shape)
 
     test_states = np.r_[0, 0, 1, 1, 0, 1]
+    test_states_sized = np.broadcast_to(test_states, (3,) + test_states.shape)
     test_sample = switching_process(
-        [at.as_tensor(0), at.as_tensor(test_mus)], test_states, size=3
+        [at.as_tensor(0), at.as_tensor(test_mus)], test_states_sized
     ).eval()
     assert np.array_equal(test_sample.shape, (3,) + test_mus.shape)
     assert np.all(test_sample.sum(0)[..., test_states > 0] > 0)
@@ -424,6 +430,7 @@ def test_switching_process_random():
     assert np.all(test_sample[test_states == 1] < 1000)
     assert np.all(100 < test_sample[test_states == 2])
 
+    test_states = np.r_[2, 0, 1, 2, 0, 1]
     test_mus = np.r_[100, 100, 500, 100, 100, 100]
     test_dists = [
         at.as_tensor(0),
@@ -457,18 +464,13 @@ def test_switching_process_random():
     assert np.all(900 < test_sample[test_states == 2])
 
     # Make sure we can use a large number of distributions in the mixture
-    test_states = np.ones(50)
+    test_states = np.ones(50, dtype=np.int64)
     test_dists = [at.as_tensor(i) for i in range(50)]
     test_dist = switching_process(test_dists, test_states)
     assert np.array_equal(test_dist.shape.eval(), test_states.shape)
 
-
-def test_switching_process_logp():
-
-    srng = atr.RandomStream(2023532)
-
     test_states = np.r_[2, 0, 1, 2, 0, 1]
-    test_dists = [at.as_tensor(0), srng.poisson(100.0), srng.poisson(1000.0)]
+    test_dists = [atr.poisson(0.0), atr.poisson(100.0), atr.poisson(1000.0)]
     test_dist = switching_process(test_dists, test_states)
     assert np.array_equal(test_dist.shape.eval(), test_states.shape)
 
@@ -481,9 +483,9 @@ def test_switching_process_logp():
 
     test_mus = np.r_[100, 100, 500, 100, 100, 100]
     test_dists = [
-        at.as_tensor(0),
-        srng.poisson(test_mus),
-        srng.poisson(10000.0),
+        dirac_delta(at.as_tensor(0)),
+        atr.poisson(test_mus),
+        atr.poisson(10000.0),
     ]
     test_dist = switching_process(test_dists, test_states)
     assert np.array_equal(test_dist.shape.eval(), test_states.shape)
@@ -494,59 +496,77 @@ def test_switching_process_logp():
     assert np.all(0 < test_sample[5] < 200)
     assert np.all(5000 < test_sample[test_states == 2])
 
-    test_dists = [at.as_tensor(0), srng.poisson(100.0), srng.poisson(1000.0)]
-    test_dist = switching_process(test_dists, test_states)
-    for i in range(len(test_dists)):
-        comp_var = test_dists[i]
-        test_moment = comp_var.owner.inputs[3] if comp_var.owner else comp_var
-        test_obs = at.tile(test_moment, test_states.shape)
-        test_logp = logprob(test_dist, test_obs)
-        test_logp_val = test_logp.eval()
-        assert (
-            test_logp_val[test_states != i].max()
-            < test_logp_val[test_states == i].min()
-        )
 
-    # Try a continuous mixture
-    test_states = np.r_[2, 0, 1, 2, 0, 1]
+def test_switching_process_logp():
+
+    srng = atr.RandomStream(2023532)
+
+    states_rv = srng.categorical([1 / 3, 1 / 3, 1 / 3], size=6, name="states")
+    states_vv = states_rv.clone()
+    states_vv.name = "states_vv"
+
+    states_vals = np.r_[2, 0, 1, 2, 0, 1]
+    states_vv.tag.test_value = states_vals
+
     test_dists = [
-        srng.normal(0.0, 1.0),
-        srng.normal(100.0, 1.0),
-        srng.normal(1000.0, 1.0),
+        dirac_delta(at.as_tensor(0, dtype=np.int64)),
+        srng.poisson(100),
+        srng.poisson(1000),
     ]
-    test_dist = switching_process(test_dists, test_states)
-    assert np.array_equal(test_dist.shape.eval(), test_states.shape)
+    test_dist = switching_process(test_dists, states_rv)
+    sw_vv = test_dist.clone()
+    sw_vv.name = "sw_vv"
 
-    test_sample = test_dist.eval()
-    assert test_sample.shape == (test_states.shape[0],)
-    assert np.all(test_sample[test_states == 0] < 10)
-    assert np.all(50 < test_sample[test_states == 1])
-    assert np.all(test_sample[test_states == 1] < 150)
-    assert np.all(900 < test_sample[test_states == 2])
+    test_logp = joint_logprob({test_dist: sw_vv, states_rv: states_vv}, sum=False)
+    obs_vals = np.array([1000, 0, 100, 1000, 0, 100], dtype=np.int64)
+    test_logp_val = test_logp.eval({sw_vv: obs_vals, states_vv: states_vals})
 
-    # Make sure we can use a large number of distributions in the mixture
-    test_states = np.ones(50)
-    test_dists = [at.as_tensor(i) for i in range(50)]
-    test_dist = switching_process(test_dists, test_states)
-    assert np.array_equal(test_dist.shape.eval(), test_states.shape)
+    np.testing.assert_array_almost_equal(
+        test_logp_val[states_vals == 0], np.array([np.log(1 / 3)] * 2)
+    )
+    np.testing.assert_array_almost_equal(
+        test_logp_val[states_vals == 1],
+        np.array([np.log(1 / 3) + sp.poisson(100).logpmf(100)] * 2),
+        decimal=5,
+    )
+    np.testing.assert_array_almost_equal(
+        test_logp_val[states_vals == 2],
+        np.array([np.log(1 / 3) + sp.poisson(1000).logpmf(1000)] * 2),
+        decimal=4,
+    )
 
     # Evaluate multiple observed state sequences in an extreme case
-    test_states = at.lmatrix("states")
-    test_dist = switching_process([at.as_tensor(0), at.as_tensor(1)], test_states)
-    test_obs = at.tile(np.arange(4), (10, 1)).astype(np.int64)
-    test_logp = logprob(test_dist, test_obs)
-    exp_logp = np.tile(
-        np.array([0.0] + [-np.inf] * 3, dtype=aesara.config.floatX), (10, 1)
+    states_rv = srng.categorical([1 / 2, 1 / 2], size=(10, 4), name="states")
+    states_vv = states_rv.clone()
+    states_vv.name = "states_vv"
+
+    test_dist = switching_process(
+        [
+            dirac_delta(at.as_tensor(0, dtype=np.int64)),
+            dirac_delta(at.as_tensor(1, dtype=np.int64)),
+        ],
+        states_rv,
     )
-    test_logp_val = test_logp.eval({test_states: np.zeros((10, 4)).astype(np.int64)})
+    test_dist.name = "switching_dist"
+
+    test_obs = at.tile(np.arange(4), (10, 1)).astype(np.int64)
+
+    test_logp = joint_logprob({test_dist: test_obs, states_rv: states_vv}, sum=False)
+
+    exp_logp = np.tile(
+        np.array([np.log(0.5)] + [-np.inf] * 3, dtype=aesara.config.floatX), (10, 1)
+    )
+    test_logp_val = test_logp.eval({states_vv: np.zeros((10, 4)).astype(np.int64)})
     assert np.array_equal(test_logp_val, exp_logp)
 
 
 def test_poisson_zero_process_model():
     srng = atr.RandomStream(seed=2023532)
+
     test_mean = at.as_tensor(1000.0)
     states = srng.bernoulli(0.5, size=10, name="states")
-    Y = poisson_zero_process(test_mean, states)
+
+    Y = poisson_zero_process(test_mean, states, srng=srng)
 
     # We want to make sure that the sampled states and observations correspond,
     # because, if there are any zero states with non-zero observations, we know

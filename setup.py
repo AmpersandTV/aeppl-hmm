@@ -14,7 +14,12 @@ setup(
     maintainer="Brandon T. Willard",
     maintainer_email="aesara-devs@gmail.com",
     packages=["aeppl_hmm"],
-    install_requires=["numpy>=1.18.1", "scipy>=1.4.0", "aesara", "aeppl"],
+    install_requires=[
+        "numpy>=1.18.1",
+        "scipy>=1.4.0",
+        "aesara>=2.3.4",
+        "aeppl>=0.0.23",
+    ],
     tests_require=["pytest"],
     long_description=open("README.md").read() if exists("README.md") else "",
     long_description_content_type="text/markdown",
