@@ -8,7 +8,7 @@ from aeppl import joint_logprob
 from aeppl.dists import dirac_delta
 from aeppl.logprob import logprob
 
-from aeppl_hmm.logprob import (
+from aeppl_hmm.dists import (
     discrete_markov_chain,
     poisson_zero_process,
     switching_process,
