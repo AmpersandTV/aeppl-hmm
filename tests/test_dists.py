@@ -563,8 +563,8 @@ def test_switching_process_logp():
 def test_poisson_zero_process_model():
     srng = atr.RandomStream(seed=2023532)
 
-    test_mean = at.as_tensor(1000.0)
-    states = srng.bernoulli(0.5, size=10, name="states")
+    test_mean = at.repeat(at.as_tensor(1000.0), 20)
+    states = srng.bernoulli(0.5, size=20, name="states")
 
     Y = poisson_zero_process(test_mean, states, srng=srng)
 
@@ -585,3 +585,6 @@ def test_poisson_zero_process_model():
         test_states, test_Y = sample_fn()
         assert np.all(0 < test_Y[..., test_states > 0])
         assert np.all(test_Y[..., test_states > 0] < 10000)
+        # Make sure we're sampling different values each time
+        unique_nonzero_Y = set(y for y in test_Y if y > 0)
+        assert len(unique_nonzero_Y) > 1
