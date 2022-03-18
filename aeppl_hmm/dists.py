@@ -168,7 +168,7 @@ def create_discrete_mc_op(rng, size, Gammas, gamma_0):
     return DiscreteMarkovChainFactory(
         [size_param, Gammas_param, gamma_0_param],
         [res.T],
-        inline=False,
+        inline=True,
         on_unused_input="ignore",
     )
 
